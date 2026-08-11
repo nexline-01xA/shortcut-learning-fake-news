@@ -1,0 +1,324 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{cite}
+
+\begin{document}
+
+\title{Investigating Shortcut Learning in Transformer-Based Fake News Detection: An Explainability and Ablation Study}
+
+\author{\IEEEauthorblockN{Hemanth Nomula}
+\IEEEauthorblockA{Department of Computer Science (AI \& ML) \\
+SRM Institute of Science and Technology}}
+
+\maketitle
+
+\begin{abstract}
+Transformer-based language models routinely achieve near-perfect accuracy on standard fake news detection benchmarks, a result frequently reported as evidence of strong misinformation-detection capability. Prior work \cite{hoy2022} has shown that such benchmarks, including the Kaggle/ISOT Fake-and-Real-News dataset used here, contain source-specific lexical artifacts -- most notably the token ``Reuters'' -- that inflate in-domain accuracy without reflecting genuine misinformation understanding, and that models trained on one political-news dataset generalize poorly to others. This paper presents an independent replication of these findings using two model families (a classical TF-IDF + Logistic Regression pipeline and a fine-tuned DistilBERT transformer) and a distinct cross-dataset pairing (Kaggle/ISOT trained, LIAR tested), together with a more granular ablation isolating lexical from stylistic contributions and two additional controls addressing plausible alternative explanations. In-domain, a fine-tuned DistilBERT model achieves near-ceiling accuracy ($>99\%$) on the Kaggle dataset. Separately, a TF-IDF + Logistic Regression classifier trained on Kaggle achieves 98.91\% in-domain accuracy but collapses to 48.48\% -- below chance level for a binary task -- when evaluated zero-shot on LIAR, a 50.4 percentage point drop consistent with the generalization failure reported in \cite{hoy2022}; this cross-dataset test was conducted with the classical pipeline only, and DistilBERT's cross-dataset generalization was not separately measured, a scope limitation discussed in Section VIII. A length-confounder control isolates the classical-pipeline collapse from mere text-length mismatch: truncating in-domain Kaggle articles to LIAR's average length produces only a 4.7 point drop, indicating length accounts for under one-tenth of the cross-dataset collapse. LIME analysis of the DistilBERT model confirms the token ``Reuters'' as a dominant predictive signal for the REAL class, appearing in 83\% of REAL articles versus 1.2\% of FAKE articles; targeted removal of this token produces a small, consistent accuracy decrease, replicated across 3 random seeds for the classical pipeline (mean $0.29 \pm 0.06$ percentage points), evidence consistent with a genuine, if modest, contribution of lexical leakage, while additional stylistic-artifact removal adds no further measurable effect. We further report a methodological finding: an initial ablation experiment produced an anomalous perfect-accuracy result later traced to a data-pipeline defect, illustrating the importance of independent verification when evaluation results appear implausibly clean. This work contributes a replication of documented shortcut-learning behavior in fake news detection across two model families, with controls ruling out length confounding and single-seed noise as alternative explanations, and demonstrates verification practices for distinguishing genuine findings from pipeline artifacts.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Fake news detection, shortcut learning, transformer models, explainable AI, DistilBERT, model generalizability.
+\end{IEEEkeywords}
+
+\section{Introduction}
+Automated fake news detection has attracted substantial research interest as a countermeasure to the spread of misinformation online. Benchmark datasets such as the Kaggle Fake-and-Real-News corpus and the LIAR dataset \cite{wang2017} are widely used to train and evaluate classifiers, with transformer-based architectures such as BERT and DistilBERT frequently reported to achieve accuracy in excess of 95--99\%.
+
+Such results are commonly presented as evidence of strong model capability. However, a growing body of work on shortcut learning \cite{geirhos2020} has shown that deep learning models frequently achieve high benchmark performance by exploiting statistical regularities in the data -- such as source formatting, publication conventions, or annotation artifacts -- rather than by learning the semantic task the benchmark is intended to measure. A model that has learned to detect ``articles that look like wire-service reporting'' rather than ``articles that are factually accurate'' will perform well on a held-out test set drawn from the same source distribution, but is unlikely to generalize to real-world deployment.
+
+This paper investigates this question directly for fake news detection, as an independent replication of findings first reported in \cite{hoy2022} using a distinct model architecture and dataset pairing (detailed in Section II). We use explainability analysis (LIME), direct corpus statistics, controlled ablation experiments, and cross-dataset generalization testing to verify whether a high-performing transformer classifier trained on a standard benchmark relies on genuine linguistic markers of misinformation or on dataset-specific artifacts, and report both the substantive finding and a methodological complication encountered during the investigation.
+
+\section{Related Work}
+Wang \cite{wang2017} introduced the LIAR dataset, a collection of approximately 12,800 short political statements labeled on a six-point truthfulness scale, and reported that even hybrid CNN-based models struggled to exceed 27\% accuracy on the original six-class task, noting the difficulty of truth verification from short claims alone. The Kaggle Fake-and-Real-News dataset used in this study is a public mirror of the ISOT Fake News Dataset \cite{ahmed2017}, whose original construction methodology explicitly states that REAL articles were sourced from Reuters.com while FAKE articles were drawn from sites flagged by PolitiFact -- a source-conflated collection design that, as established below, is directly responsible for the artifact this paper investigates.
+
+Critically, this specific artifact is not a novel discovery of this paper. Hoy and Koulouri \cite{hoy2022}, in a peer-reviewed IEEE Big Data conference paper, directly documented that the token ``Reuters'' appeared in 52 of 100 sampled ISOT REAL articles versus near-absence in FAKE articles, and used LIME -- the same technique used in this study -- to demonstrate that token-based models are more sensitive to such source-specific artifacts than stylistic features, additionally reporting an approximately 30\% accuracy drop when models were evaluated across different political-news datasets. The present study should therefore be understood as an independent replication of the core findings in \cite{hoy2022}, using an independently constructed pipeline, additional model architectures (a fine-tuned DistilBERT transformer for in-domain classification and explainability, alongside a classical TF-IDF + Logistic Regression pipeline used specifically for the cross-dataset and control experiments), and a different cross-dataset pairing (Kaggle/ISOT trained, LIAR tested, rather than their political-news dataset pairs). Ribeiro et al. \cite{ribeiro2016} introduced LIME (Local Interpretable Model-agnostic Explanations) itself, the explainability technique used by both this study and in \cite{hoy2022} to identify token-level model reliance. Geirhos et al. \cite{geirhos2020} formalized the concept of shortcut learning in deep neural networks, providing the broader theoretical framework within which both studies' findings sit.
+
+Given this prior work, the contribution of this paper is not the discovery that ISOT/Kaggle contains Reuters-token leakage, nor that fake news classifiers generalize poorly across datasets -- both are established findings. The contribution is: (1) an independent replication using a distinct model architecture and dataset pairing, strengthening the external validity of the original finding; (2) a more granular ablation design distinguishing lexical (Reuters-token) from stylistic (punctuation/capitalization) contributions, which \cite{hoy2022} did not separately isolate; and (3) a transparent methodological account of a data-pipeline defect encountered during the ablation process, offered as a practical contribution to reproducibility practice in applied ML research of this kind.
+
+\begin{table}[!t]
+\caption{Comparison with Prior Work}
+\centering
+\begin{tabular}{p{1.1cm}p{1.5cm}p{1.5cm}p{2.3cm}}
+\toprule
+Paper & Dataset(s) & Model(s) & Difference from this work \\
+\midrule
+Hoy \& Koulouri \cite{hoy2022} & ISOT + other political-news & Classical ML + neural & Original finding \\
+This paper & ISOT/Kaggle + LIAR & DistilBERT + TF-IDF/LogReg & Independent replication, added lexical-vs-stylistic split, length control \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Datasets}
+\subsection{LIAR Dataset}
+The LIAR dataset consists of 12,791 short political statements (after removing 26 duplicate entries and rows with missing labels), each labeled on a six-point scale that we collapse to a binary REAL/FAKE label following standard practice. The exact mapping function is given below, where $y$ denotes the original six-point label:
+
+\begin{equation}
+f(y) = \begin{cases}
+\text{REAL}, & y \in \{\text{true, mostly-true, half-true}\} \\
+\text{FAKE}, & y \in \{\text{barely-true, false, pants-fire}\}
+\end{cases}
+\end{equation}
+
+The resulting class distribution is 7,134 REAL (55.8\%) and 5,657 FAKE (44.2\%), a mild 1.26:1 imbalance. Statements average 18.0 words in length (median 17, maximum 467).
+
+\subsection{Kaggle Fake-and-Real-News Dataset}
+The Kaggle Fake-and-Real-News dataset consists of full-length news articles rather than short claims. After removing 5,793 duplicate articles (13.0\% of the raw corpus) and rows with missing content, 39,105 articles remain: 21,197 REAL (54.2\%) and 17,908 FAKE (45.8\%), a mild 1.18:1 imbalance. Articles average 417.7 words (median 375), an order of magnitude longer than LIAR statements. This length difference reflects a substantively different task: short-claim verification (LIAR) versus full-article style and content classification (Kaggle).
+
+\section{Methodology}
+\subsection{Preprocessing}
+Two preprocessing pipelines were used. Pipeline A, for classical machine learning baselines, applies lowercasing, HTML/URL stripping, punctuation removal, single-character token removal, and stopword removal (scikit-learn's English stopword list). Pipeline B, for transformer models, preserves case, punctuation, and stopwords -- since these carry signal for contextual models -- and strips only HTML, URLs, and a known source-specific dateline pattern (``CITY (Reuters) --'').
+
+\subsection{Baseline Models}
+TF-IDF vectorization (10,000 features) was combined with Logistic Regression, Multinomial Naive Bayes, and Linear SVM, trained separately on each dataset with an 80/20 stratified train-test split. For a term $t$ in document $d$, drawn from a corpus of $N$ documents in which $t$ appears in $n_t$ documents, the TF-IDF weight is:
+
+\begin{equation}
+\text{tfidf}(t, d) = \frac{f_{t,d}}{|d|} \times \log\left(\frac{N}{1 + n_t}\right)
+\end{equation}
+
+where $f_{t,d}$ is the raw count of $t$ in $d$ and $|d|$ is the document length in tokens. For the Logistic Regression baseline, the predicted probability of the REAL class given feature vector $\mathbf{x}$ is:
+
+\begin{equation}
+P(y = 1 \mid \mathbf{x}) = \sigma(\mathbf{w}^\top\mathbf{x} + b) = \frac{1}{1 + e^{-(\mathbf{w}^\top\mathbf{x} + b)}}
+\end{equation}
+
+where $\mathbf{w}$ and $b$ are the learned weight vector and bias, and $\sigma$ denotes the logistic sigmoid function.
+
+\subsection{Transformer Fine-Tuning}
+DistilBERT (distilbert-base-uncased) was fine-tuned for 3 epochs per dataset, with sequence length capped at 64 tokens for LIAR and 256 tokens for Kaggle to reflect each dataset's typical article length, using the Hugging Face Transformers library on a single T4 GPU.
+
+\subsection{Explainability Analysis}
+LIME was applied to the fine-tuned Kaggle DistilBERT model on 10 REAL and 10 FAKE test-set predictions, generating per-example word-importance scores via 300 local perturbation samples per example. Following Ribeiro et al. \cite{ribeiro2016}, LIME identifies an interpretable local explanation $g$ for a prediction on instance $x$ by solving:
+
+\begin{equation}
+\xi(x) = \arg\min_{g \in G} \mathcal{L}(f, g, \pi_x) + \Omega(g)
+\end{equation}
+
+where $f$ is the black-box classifier (DistilBERT), $G$ is a class of interpretable models (here, sparse linear models over token presence/absence), $\pi_x$ is a proximity measure weighting perturbed samples $z$ by similarity to $x$, and $\Omega(g)$ penalizes model complexity to favor a small number of explanatory tokens. The fidelity term is:
+
+\begin{equation}
+\mathcal{L}(f, g, \pi_x) = \sum_{z, z' \in Z} \pi_x(z) \left(f(z) - g(z')\right)^2
+\end{equation}
+
+summed over perturbed samples $z$ (interpretable binary representation $z'$) drawn from the perturbation set $Z$ around $x$. Word-level importance scores were aggregated across examples to identify globally influential tokens for each predicted class.
+
+\subsection{Ablation Design}
+To test causality rather than mere correlation, two interventions were designed based on the explainability findings: (1) removal of the token ``Reuters'' from all article text (not only the dateline prefix, which was found to leave 17,794 in-body mentions unaddressed), and (2) neutralization of stylistic artifacts identified through corpus statistics -- specifically, collapsing repeated exclamation and question marks and converting ALL-CAPS words to Title Case. Models were retrained on each modified version of the data and compared against a baseline trained on unmodified text, holding all other hyperparameters constant.
+
+\section{Results}
+\subsection{Baseline Model Performance}
+\begin{table}[!t]
+\caption{Baseline Model Performance}
+\centering
+\begin{tabular}{lccc}
+\toprule
+Dataset & Model & Accuracy & F1 \\
+\midrule
+LIAR & Logistic Regression & 60.36\% & 48.26\% \\
+LIAR & Naive Bayes & 60.48\% & 40.75\% \\
+LIAR & Linear SVM & 57.81\% & 49.46\% \\
+Kaggle & Logistic Regression & 98.30\% & 98.13\% \\
+Kaggle & Naive Bayes & 93.75\% & 93.18\% \\
+Kaggle & Linear SVM & 98.91\% & 98.81\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Transformer Model Performance}
+\begin{table}[!t]
+\caption{Transformer Model Performance}
+\centering
+\begin{tabular}{lcccc}
+\toprule
+Dataset & Model & Acc. & F1 & Time \\
+\midrule
+LIAR & DistilBERT & 62.44\% & 59.62\% & 3.8 min \\
+Kaggle & DistilBERT & 99.97\%* & 99.96\%* & 5.7--9.2 min \\
+\bottomrule
+\end{tabular}
+\end{table}
+*Kaggle DistilBERT results are drawn from the balanced-test-set verified run (Section V-E); an initial single run without cross-verification produced 100.00\% and prompted the investigation reported in this paper.
+
+On LIAR, DistilBERT improves over the strongest classical baseline (Naive Bayes, 60.48\%) by 2.0 percentage points in accuracy and approximately 11 points in F1 -- a real but modest gain, consistent with the hypothesis that short political claims contain limited linguistic signal for truthfulness independent of external fact-checking. Notably, training loss continued to decrease through epoch 3 while validation F1 peaked at epoch 2 and declined thereafter, indicating overfitting; the best checkpoint (epoch 2) was retained via early-stopping-equivalent checkpoint selection.
+
+On Kaggle, both classical and transformer models exceed 98\% accuracy, with DistilBERT approaching the performance ceiling. This near-perfect performance, substantially higher than typically reported for open-domain fact verification, motivated the explainability and ablation analysis that follows.
+
+\subsection{Explainability Findings (LIME)}
+LIME analysis of the Kaggle DistilBERT model's predictions reveals a marked asymmetry between the two classes.
+
+\begin{table}[!t]
+\caption{Top LIME-Weighted Tokens}
+\centering
+\begin{tabular}{lcc}
+\toprule
+Token & Avg. LIME Weight & Direction \\
+\midrule
+Indonesia & 0.43 & REAL \\
+parliament & 0.16 & REAL \\
+Indonesians & 0.13 & REAL \\
+committee & 0.10 & REAL \\
+Senate & 0.083 & REAL \\
+party & 0.080 & REAL \\
+Reuters & 0.061 & REAL \\
+protest & 0.009 & FAKE \\
+meanwhile & $-$0.009 & FAKE \\
+replaced & 0.009 & FAKE \\
+official & 0.007 & FAKE \\
+TWO & $-$0.007 & FAKE \\
+WALK & 0.006 & FAKE \\
+that & 0.005 & FAKE \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Words most strongly associated with REAL predictions carry substantial importance weight and are dominated by institutional and geopolitical vocabulary. By contrast, the top FAKE-associated tokens carry weights below 0.01 in magnitude -- roughly one to two orders of magnitude smaller than the strongest REAL-associated weights -- and lack any consistent topical theme (protest, meanwhile, replaced, official). This asymmetry suggests the classifier's decision function is dominated by positive evidence for the REAL class -- institutional and wire-service markers -- with FAKE predictions arising largely as a default in the absence of such markers, rather than from any strong positive indicator of misinformation content.
+
+\subsection{Frequency Verification}
+To test whether LIME's local explanations reflect genuine corpus-level patterns rather than instance-specific noise, we computed direct token frequency by class across the full 39,105-article corpus.
+
+\begin{table}[!t]
+\caption{Reuters Token Frequency by Class}
+\centering
+\begin{tabular}{lccc}
+\toprule
+Token & REAL & FAKE & Ratio \\
+\midrule
+Reuters & 17,585 (83.0\%) & 209 (1.2\%) & 71.1x \\
+parliament & 1,671 (7.9\%) & 98 (0.6\%) & 14.4x \\
+Yomiuri & 11 (0.05\%) & 1 (0.01\%) & 9.3x \\
+Indonesia & 182 (0.9\%) & 32 (0.2\%) & 4.8x \\
+Senate & 3,659 (17.3\%) & 1,502 (8.4\%) & 2.1x \\
+committee & 3,203 (15.1\%) & 1,180 (6.6\%) & 2.3x \\
+Dr & 136 (0.6\%) & 397 (2.2\%) & 0.29x \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The token ``Reuters'' shows by far the strongest disproportion (71.1x), consistent with this being a genuine corpus-level artifact rather than an instance-specific LIME approximation error. The corpus-wide distribution of this dominant lexical shortcut across the respective target classes is illustrated in Fig.~1.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=0.85\linewidth]{fig1_reuters_frequency.png}
+\caption{Article count containing the token ``Reuters'' by class, showing a 71.1x disproportion between REAL and FAKE articles in the Kaggle/ISOT corpus.}
+\end{figure}
+
+\subsection{Ablation Results}
+Removal of the ``Reuters'' token was tested against two independently verified pipelines, both showing a small, genuine, positive drop.
+
+\begin{table}[!t]
+\caption{Reuters Ablation Results}
+\centering
+\begin{tabular}{lccc}
+\toprule
+Pipeline & Condition & Acc. & F1 \\
+\midrule
+DistilBERT (15K) & With Reuters & 99.97\% & 99.96\% \\
+DistilBERT (15K) & Reuters removed & 99.93\% & 99.93\% \\
+TF-IDF+LogReg (full) & Original & 98.75\% & 98.62\% \\
+TF-IDF+LogReg (full) & Reuters removed & 98.39\% & 98.23\% \\
+TF-IDF+LogReg (full) & + de-styled & 98.39\% & 98.23\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Both independently verified pipelines show a consistent, small accuracy decrease following Reuters removal. To address the concern that this effect could reflect single-run variance rather than a stable pattern, the TF-IDF pipeline was re-run across 3 random seeds (42, 100, 999) with independent train-test splits for each condition.
+
+\begin{table}[!t]
+\caption{Multi-Seed Variance Check}
+\centering
+\begin{tabular}{lcc}
+\toprule
+Condition & Accuracy (mean $\pm$ SD) & F1 (mean $\pm$ SD) \\
+\midrule
+Original & $98.59\% \pm 0.11\%$ & $98.45\% \pm 0.12\%$ \\
+Reuters removed & $98.29\% \pm 0.07\%$ & $98.13\% \pm 0.08\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The accuracy drop was positive across all 3 seeds (0.22, 0.31, and 0.36 percentage points; mean $0.29\%$, SD $0.06\%$), indicating the direction of the effect is stable rather than attributable to single-split noise. This is consistent with the Reuters token contributing to model performance. We note this multi-seed check was performed only for the TF-IDF pipeline; the DistilBERT ablation results remain single-run due to computational cost, retained as an explicit limitation (Section VIII).
+
+\subsection{Structural Artifact Analysis}
+Independent of the ablation experiments, we computed corpus-level structural statistics to characterize surface-level stylistic differences between classes.
+
+\begin{table}[!t]
+\caption{Structural Artifact Statistics}
+\centering
+\begin{tabular}{lccc}
+\toprule
+Feature & FAKE & REAL & Rel. Diff. \\
+\midrule
+Exclamation marks / art. & 0.842 & 0.063 & +1237\% \\
+Question marks / art. & 1.230 & 0.107 & +1054\% \\
+Capital-letter ratio & 6.9\% & 4.1\% & +70\% \\
+ALL-CAPS words / art. & 8.64 & 5.88 & +47\% \\
+Avg. sentence length & 19.04 & 19.99 & $-$5\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+FAKE articles in this corpus show substantially higher use of exclamation marks, question marks, and capitalization -- consistent with a tabloid or clickbait writing register -- while sentence and word length are comparable between classes.
+
+\subsection{Cross-Dataset Generalization}
+The token-level and structural ablations above test specific, hypothesized artifacts using DistilBERT. As a broader and less targeted test, we evaluated whether a TF-IDF + Logistic Regression classifier trained entirely on Kaggle articles generalizes to the LIAR dataset without any retraining. This test used the classical pipeline rather than DistilBERT; see Section VIII for the scope implications of this choice.
+
+\begin{table}[!t]
+\caption{Cross-Dataset Generalization Results}
+\centering
+\begin{tabular}{lc}
+\toprule
+Test condition & Accuracy \\
+\midrule
+In-domain (Kaggle self-test) & 98.91\% \\
+Cross-domain (LIAR-tested) & 48.48\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Accuracy collapses by 50.4 percentage points under distribution shift, falling below the 50\% chance-level baseline for a binary task, with REAL-class recall dropping to 25\%. Within the experiments conducted in this study, this result provides the strongest evidence for the shortcut-learning hypothesis.
+
+\subsection{Length-Confounder Control}
+A plausible alternative explanation for the cross-dataset collapse is text length rather than domain shift. To isolate length from domain, we truncated held-out Kaggle test articles to their first 18 words (matching LIAR's average length) while keeping them within the Kaggle domain.
+
+\begin{table}[!t]
+\caption{Length-Confounder Control Results}
+\centering
+\begin{tabular}{lc}
+\toprule
+Condition & Accuracy \\
+\midrule
+Full-length Kaggle & 98.91\% \\
+Truncated Kaggle (18 words) & 94.25\% \\
+LIAR (cross-domain) & 48.48\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Truncation alone, holding domain constant, produces only a 4.7 percentage point drop -- substantially smaller than the 50.4 point drop observed under genuine domain shift, indicating that text length is not the primary driver of the cross-dataset collapse.
+
+\section{Methodological Note: An Anomalous Result and Its Resolution}
+During the ablation phase, an initial three-way comparison (original text, Reuters-removed, Reuters-removed and de-styled) was run twice, on two separate execution environments, and both times returned identical perfect scores (100.00\% accuracy, precision, recall, and F1) across all three conditions. Because a genuinely trained model producing an exact four-decimal tie across three independent training runs is implausible, this result was treated as suspect rather than reported as a finding.
+
+Investigation traced the anomaly to an interaction between two pipeline choices made to handle a CSV parsing error: skipping malformed rows combined with an unconditional sample size, which under certain row-count conditions produced a test split with insufficient representation of one class. Independent verification using an uncorrupted copy of the full dataset with a properly stratified split reproduced the expected small, non-zero effect, confirming the 100\%/100\%/100\% result was a data-pipeline artifact rather than a genuine null result.
+
+\section{Discussion}
+Taken together, these results support a nuanced conclusion. The most direct evidence against genuine generalization is the cross-dataset test (Section V-G): a model achieving 98.91\% in-domain accuracy collapses to 48.48\% -- below chance -- when applied to a different, genuinely out-of-distribution dataset. The token- and structural-level analyses offer partial insight into why: LIME analysis shows that the model's REAL-class predictions are driven overwhelmingly by institutional and source-related vocabulary rather than by any positive indicator of factual accuracy. This pattern is a documented signature of shortcut learning \cite{geirhos2020}.
+
+The LIAR results independently support this concern from a different angle: on short political claims, where source-formatting artifacts are largely absent, both classical and transformer models perform only marginally better than chance, consistent with the difficulty originally reported in \cite{wang2017}.
+
+\section{Limitations}
+This study has several limitations. Most importantly, the cross-dataset generalization test and the length-confounder control were conducted using the TF-IDF + Logistic Regression pipeline only; DistilBERT's cross-dataset generalization was not directly measured. Given that classical and transformer models showed similar in-domain accuracy on Kaggle and similar direction of effect in the Reuters ablation, we consider it plausible that DistilBERT would show a comparable cross-dataset collapse, consistent with \cite{hoy2022}'s finding of similar generalization failure using neural architectures, but this is an inference from indirect evidence, not a directly measured result. The TF-IDF ablation was verified across 3 random seeds and the direction of the Reuters-removal effect was stable; however, the DistilBERT ablation, the cross-dataset test, and the length-confounder control remain single-run due to computational cost. Additionally: the ablation experiments target only specific artifacts surfaced by LIME and corpus statistics; LIME explanations were computed on a sample of 20 predictions; the transformer ablation used a 15,000-article subsample; this study evaluates only English-language text and only one transformer architecture (DistilBERT).
+
+\section{Conclusion}
+This paper presented an independent replication of shortcut-learning findings first reported in \cite{hoy2022}, using two model families (DistilBERT and TF-IDF + Logistic Regression) and a distinct cross-dataset pairing. We find that source-specific lexical leakage (the token ``Reuters'') makes a real but modest contribution to model performance, and that the DistilBERT model's predictions are structurally asymmetric. The cross-dataset collapse observed here (50.4 percentage points) is directionally consistent with, and larger than, the approximately 30-point drop reported in \cite{hoy2022}. These findings reinforce that high accuracy on this widely-used benchmark should not be interpreted as evidence of semantic misinformation understanding.
+
+\begin{thebibliography}{5}
+\bibitem{hoy2022} N. Hoy and T. Koulouri, ``Exploring the generalisability of fake news detection models,'' in \emph{2022 IEEE International Conference on Big Data (Big Data)}, 2022, pp. 5731--5740.
+\bibitem{wang2017} W. Y. Wang, ```Liar, liar pants on fire': A new benchmark dataset for fake news detection,'' in \emph{Proc. 55th Annual Meeting of the Association for Computational Linguistics}, 2017, pp. 422--426.
+\bibitem{geirhos2020} R. Geirhos et al., ``Shortcut learning in deep neural networks,'' \emph{Nature Machine Intelligence}, vol. 2, no. 11, pp. 665--673, 2020.
+\bibitem{ahmed2017} H. Ahmed, I. Traore, and S. Saad, ``Detection of online fake news using N-gram analysis and machine learning techniques,'' in \emph{Intelligent, Secure, and Dependable Systems in Distributed and Cloud Environments}, Springer, 2017.
+\bibitem{ribeiro2016} M. T. Ribeiro, S. Singh, and C. Guestrin, ```Why should I trust you?': Explaining the predictions of any classifier,'' in \emph{Proc. 22nd ACM SIGKDD Int. Conf. Knowledge Discovery and Data Mining}, 2016, pp. 1135--1144.
+\end{thebibliography}
+
+\end{document}

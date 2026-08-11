@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: >-
+  If you use this repository, please cite it using the metadata below.
+  The accompanying manuscript is currently submitted / under review
+  (see "Status" in the README) — this citation covers the repository
+  and code, not a published paper.
+title: >-
+  shortcut-learning-fake-news: Code and materials for "Investigating
+  Shortcut Learning in Transformer-Based Fake News Detection: An
+  Explainability and Ablation Study"
+type: software
+authors:
+  - family-names: Nomula
+    given-names: Hemanth
+repository-code: "https://github.com/REPLACE_WITH_YOUR_USERNAME/shortcut-learning-fake-news"
+license: MIT
+version: 0.1.0
+date-released: "2026-08-12"
+preferred-citation:
+  type: unpublished
+  title: >-
+    Investigating Shortcut Learning in Transformer-Based Fake News
+    Detection: An Explainability and Ablation Study
+  authors:
+    - family-names: Nomula
+      given-names: Hemanth
+  status: preprint
+  notes: >-
+    Submitted to ICCCMLA 2026; currently under review. No DOI or
+    publication venue is assigned yet. Update this entry once/if the
+    paper is accepted.

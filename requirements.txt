@@ -1,0 +1,14 @@
+# Core (used by src/*.py — classical pipeline, works without a GPU)
+pandas>=1.5
+numpy>=1.23
+scikit-learn>=1.2
+
+# Transformer notebooks (notebooks/*.ipynb — requires a GPU runtime, e.g. Colab)
+torch>=2.0
+transformers>=4.30
+datasets>=2.12
+lime>=0.2.0.1
+
+# Note: package versions above are sensible minimums, not pinned historical
+# versions — the recovered notebooks install unpinned latest versions via
+# `!pip install -q ...` at runtime and do not record exact version numbers.
